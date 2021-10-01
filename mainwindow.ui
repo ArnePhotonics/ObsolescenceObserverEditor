@@ -15,7 +15,7 @@
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
-    <item row="0" column="0">
+    <item row="3" column="0">
      <widget class="QTreeWidget" name="treeWidget">
       <property name="contextMenuPolicy">
        <enum>Qt::CustomContextMenu</enum>
@@ -55,6 +55,20 @@
       </column>
      </widget>
     </item>
+    <item row="0" column="0">
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Project name:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="edt_projectname"/>
+      </item>
+     </layout>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
@@ -63,7 +77,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>26</height>
+     <height>20</height>
     </rect>
    </property>
    <widget class="QMenu" name="menubomQuote">
@@ -73,6 +87,7 @@
     <addaction name="actionopen"/>
     <addaction name="actionopen_observer_file"/>
     <addaction name="actionsave_observer_file"/>
+    <addaction name="actionupdate_Observer_file_from_bomQuote"/>
    </widget>
    <addaction name="menubomQuote"/>
   </widget>
@@ -90,6 +105,11 @@
   <action name="actionsave_observer_file">
    <property name="text">
     <string>save observer file</string>
+   </property>
+  </action>
+  <action name="actionupdate_Observer_file_from_bomQuote">
+   <property name="text">
+    <string>update Observer file from bomQuote</string>
    </property>
   </action>
  </widget>

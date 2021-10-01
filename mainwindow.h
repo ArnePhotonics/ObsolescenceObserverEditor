@@ -24,8 +24,13 @@ class MainWindow : public QMainWindow {
 
     void on_actionsave_observer_file_triggered();
 
+    void on_actionopen_observer_file_triggered();
+
+    void on_actionupdate_Observer_file_from_bomQuote_triggered();
+
     private:
     Ui::MainWindow *ui;
     BomQuoteFile bomquote_file;
+    void setTreevewItemBGColor(QTreeWidgetItem *item, int color);
 };
 #endif // MAINWINDOW_H

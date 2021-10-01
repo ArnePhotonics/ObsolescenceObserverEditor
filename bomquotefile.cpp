@@ -1,5 +1,7 @@
 #include "bomquotefile.h"
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -30,7 +32,10 @@ QString SupplierName_to_string(SupplierName name) {
     }
 };
 
-BomQuoteFile::BomQuoteFile() {}
+BomQuoteFile::BomQuoteFile() {
+    id_counter = 0;
+    project_name = "test";
+}
 
 void BomQuoteFile::open_from_csv_file(QString file_name) {
     QFile bomquote_inputfile(file_name);
@@ -108,13 +113,79 @@ void BomQuoteFile::open_from_csv_file(QString file_name) {
         parts.append(orig_part);
     }
     bomquote_inputfile.close();
-    this->file_name = file_name;
+    set_filename(file_name);
+    project_name = QFileInfo(file_name).baseName();
 }
 
+void BomQuoteFile::open_from_json_file(QString file_name) {
+    QFile loadFile(file_name);
+    loadFile.open(QIODevice::ReadOnly);
+    QByteArray saveData = loadFile.readAll();
+
+    QJsonDocument loadDoc(QJsonDocument::fromJson(saveData));
+
+    QJsonObject obj = loadDoc.object();
+    project_name = obj.keys().first();
+    auto parts_json = obj[project_name].toArray();
+    for (const auto &part_json : parts_json) {
+        auto part_obj = part_json.toObject();
+        BomQuoteOrigPart part;
+
+        const auto &alternatives_array = part_obj["alts"].toArray();
+        const auto &orig_obj = part_obj["orig"].toObject();
+        const auto &refs = part_obj["refs"].toArray();
+        for (const auto &ref : refs) {
+            part.refs.append(ref.toString());
+        }
+        part.id_timestam_ms = part_obj["id_timestamp_ms"].toInt();
+        part.qty = part_obj["qty"].toInt();
+        part.to_be_observed = part_obj["to_be_observed"].toBool();
+        part.orig_description = orig_obj["description"].toString();
+        part.orig_erp_num = orig_obj["erp"].toString();
+        part.orig_footprint = orig_obj["footprint"].toString();
+        part.orig_manufacturer = orig_obj["manufacturer"].toString();
+        part.orig_mpn = orig_obj["mpn"].toString();
+        const auto supplier_array = orig_obj["suppliers"].toArray();
+        for (const auto &supplier_val : supplier_array) {
+            BomQuoteSupplierPart supplier;
+            supplier.from_json(supplier_val.toObject());
+            part.supplier_parts.append(supplier);
+        }
+        for (const auto &alternative_val : alternatives_array) {
+            BomQuoteAltPart alternative;
+            const auto &alternative_obj = alternative_val.toObject();
+            alternative.description = alternative_obj["description"].toString();
+            alternative.erp_num = alternative_obj["erp"].toString();
+            alternative.id = alternative_obj["id"].toInt();
+            alternative.manufacturer = alternative_obj["manufacturer"].toString();
+            alternative.mpn = alternative_obj["mpn"].toString();
+            alternative.to_be_observed = alternative_obj["to_be_observed"].toBool();
+            const auto supplier_array = alternative_obj["suppliers"].toArray();
+            for (const auto &supplier_val : supplier_array) {
+                BomQuoteSupplierPart supplier;
+                supplier.from_json(supplier_val.toObject());
+                alternative.supplier_parts.append(supplier);
+            }
+            part.alternative_parts.append(alternative);
+        }
+
+        parts.append(part);
+    }
+    set_filename(file_name);
+}
+
+void BomQuoteFile::set_filename(QString fn) {
+    auto fi = QFileInfo(fn);
+    //if QFileInfo fi("/tmp/archive.tar.gz");
+    // base = "archive"
+    // QFileInfo::absolutePath(); Returns the file's path. This doesn't include the file name.
+    QString base_name = fi.baseName();
+    this->file_name = fi.absolutePath() + QDir::separator() + fi.baseName(); //extracts the file extension
+}
 void BomQuoteFile::save_to_json_file() {
     QJsonObject root_object;
     QJsonArray parts_root_array;
-    for (const auto &part : parts) {
+    for (auto &part : parts) {
         QJsonArray refs_array;
         for (const auto &s : part.refs) {
             refs_array.append(s);
@@ -126,12 +197,17 @@ void BomQuoteFile::save_to_json_file() {
         }
 
         QJsonArray alternatives_array;
-        for (const auto &alt : part.alternative_parts) {
+        for (auto &alt : part.alternative_parts) {
             QJsonObject alt_object;
-            alt_object["id"] = 0;
+            if (alt.id == 0) {
+                alt.id = get_new_id_counter_value();
+            }
+            alt_object["id"] = alt.id;
             alt_object["mpn"] = alt.mpn;
             alt_object["manufacturer"] = alt.manufacturer;
             alt_object["to_be_observed"] = alt.to_be_observed;
+            alt_object["description"] = alt.description;
+            alt_object["erp"] = alt.erp_num;
             QJsonArray alt_supplier_array;
             for (const auto &s : alt.supplier_parts) {
                 alt_supplier_array.append(s.to_json());
@@ -154,7 +230,12 @@ void BomQuoteFile::save_to_json_file() {
         part_obj["alts"] = alternatives_array;
 
         part_obj["to_be_observed"] = part.to_be_observed;
-        part_obj["id_timestamp_ms"] = 0;
+        if (part.id_timestam_ms == 0) {
+            part.id_timestam_ms = QDateTime::currentMSecsSinceEpoch();
+            part.id_timestam_ms *= 10000;
+            part.id_timestam_ms += get_new_id_counter_value();
+        }
+        part_obj["id_timestamp_ms"] = part.id_timestam_ms;
         part_obj["qty"] = part.qty;
 
         parts_root_array.append(part_obj);
@@ -170,11 +251,55 @@ void BomQuoteFile::save_to_json_file() {
     saveFile.write(saveDoc.toJson());
 }
 
+void BomQuoteFile::update_from_other_bomquote(const BomQuoteFile &other) {
+    QList<int> new_parts;
+    int other_part_index = 0;
+    for (const auto &other_part : other.parts) {
+        int found_match_at_me_index = -1;
+        int me_index = 0;
+        for (const auto &my_part : parts) {
+            if (other_part.orig_mpn.toLower() == my_part.orig_mpn.toLower()) {
+                found_match_at_me_index = me_index;
+                break;
+            }
+            me_index++;
+        }
+        if (found_match_at_me_index == -1) { //not found here
+            new_parts.append(other_part_index);
+        } else {
+            bool modified = false;
+            auto &my_part = parts[found_match_at_me_index];
+            if (my_part.qty != other_part.qty) {
+                my_part.qty = other_part.qty;
+                modified = true;
+            }
+            if (my_part.refs != other_part.refs) {
+                my_part.refs = other_part.refs;
+                modified = true;
+            }
+            my_part.modified = modified;
+        }
+        other_part_index++;
+    }
+    for (const auto &new_part_index : new_parts) {
+        auto new_part = other.parts[new_part_index];
+        new_part.modified = true;
+        parts.append(new_part);
+    }
+}
+
+int BomQuoteFile::get_new_id_counter_value() {
+    id_counter++;
+    qDebug() << id_counter;
+    return id_counter;
+}
+
 bool BomQuoteOrigPart::is_empty() {
     return orig_mpn.isEmpty();
 }
 
 void BomQuoteOrigPart::clear() {
+    modified = false;
     supplier_parts.clear();
     alternative_parts.clear();
     refs.clear();
@@ -195,4 +320,15 @@ QJsonObject BomQuoteSupplierPart::to_json() const {
     supplier_obj["url"] = url;
     supplier_obj["description"] = description;
     return supplier_obj;
+}
+
+void BomQuoteSupplierPart::from_json(QJsonObject obj) {
+    supplier_name = string_to_SupplierName(obj["supplier_name"].toString());
+    sku = obj["sku"].toString();
+    description = obj["description"].toString();
+    url = obj["url"].toString();
+}
+
+BomQuoteAltPart::BomQuoteAltPart() {
+    id = 0;
 }
